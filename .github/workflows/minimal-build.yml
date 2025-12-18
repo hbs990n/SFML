@@ -1,116 +1,95 @@
-name: Build SFML from Branch
+name: Simple SFML Build
 
 on:
   workflow_dispatch:
 
 jobs:
   build-sfml:
-    name: Build SFML from Current Branch
     runs-on: windows-2025
     
     steps:
-    - name: Checkout Current Branch
+    - name: Checkout Code
       uses: actions/checkout@v4
-      # 不指定ref，使用当前分支
     
-    - name: Setup MinGW 15.2.0
+    - name: Check Environment
       run: |
-        # 下载与你本地匹配的WinLibs
-        curl -Lo mingw64.zip https://github.com/brechtsanders/winlibs_mingw/releases/download/15.2.0posix-19.1.1-13.0.0-ucrt-r4/winlibs-x86_64-posix-seh-gcc-15.2.0-mingw-w64ucrt-13.0.0-r4.zip
-        mkdir "C:\mingw64"
-        tar -xf mingw64.zip -C "C:\mingw64" --strip-components=1
-        echo "C:\mingw64\bin" >> $GITHUB_PATH
-        echo "GCC version:"
+        echo "Checking available compilers..."
+        where gcc
+        where g++
+        where ar
         g++ --version
-    
-    - name: Show Branch Info
+        echo "Current directory:"
+        pwd
+        dir
+        
+    - name: Try Direct Compilation
       run: |
-        echo "Current branch:"
-        git branch --show-current
-        echo "Latest commit:"
-        git log -1 --oneline
-    
-    - name: Configure CMake
-      run: |
-        # 先测试是否能找到头文件
-        if exist include\SFML (
-          echo "✓ Found SFML headers"
+        echo "=== 尝试直接编译 ==="
+        
+        # 先检查头文件是否存在
+        echo "检查头文件..."
+        if exist include\SFML\System.hpp (
+          echo "✓ 找到System.hpp"
         ) else (
-          echo "✗ SFML headers not found"
+          echo "✗ 未找到System.hpp"
           dir include
           exit 1
         )
         
-        # 配置CMake
-        cmake -B build -G "MinGW Makefiles" ^
-          -DCMAKE_BUILD_TYPE=Release ^
-          -DBUILD_SHARED_LIBS=OFF ^
-          -DSFML_BUILD_EXAMPLES=OFF ^
-          -DSFML_BUILD_TESTS=OFF ^
-          -DSFML_BUILD_DOC=OFF
-    
-    - name: Build
-      run: |
-        echo "Building SFML..."
-        cmake --build build --config Release --parallel 4
-    
-    - name: Collect Artifacts
-      run: |
-        echo "Collecting compiled libraries..."
+        # 编译System模块
+        echo "编译System模块..."
+        cd src\SFML\System
         
-        # 创建输出目录
-        mkdir sfml-output
-        mkdir sfml-output\include
-        mkdir sfml-output\lib
+        # 只编译几个基本文件测试
+        g++ -c -I..\..\..\include -DSFML_STATIC Clock.cpp Err.cpp
+        if errorlevel 1 (
+          echo "编译失败，尝试不同的包含路径..."
+          # 尝试相对路径
+          g++ -c -I../../../../include -DSFML_STATIC Clock.cpp
+        )
+        
+        # 检查是否生成了.o文件
+        dir *.o
+        
+        # 如果有.o文件，创建库
+        if exist *.o (
+          ar rcs libsfml-system.a *.o
+          echo "✓ System模块编译成功"
+          mkdir ..\..\..\..\output\lib -Force
+          copy libsfml-system.a ..\..\..\..\output\lib\
+        )
+        
+        cd ..\..\..
+    
+    - name: Create Output Package
+      run: |
+        echo "=== 创建输出包 ==="
+        
+        # 创建基本目录结构
+        mkdir -p SFML-output\include
+        mkdir -p SFML-output\lib
         
         # 复制头文件
         if exist include\SFML (
-          xcopy /E /I include\SFML sfml-output\include\SFML
-          echo "✓ Headers copied"
+          xcopy /E /I include\SFML SFML-output\include\SFML
+          echo "✓ 头文件已复制"
         )
         
-        # 查找并复制所有.a库文件
-        echo "Searching for .a files..."
-        dir build /s | findstr "\.a$"
-        
-        # 尝试不同可能的路径
-        $paths = @(
-          "build\lib\Release",
-          "build\SFML\System\Release", 
-          "build\SFML\Window\Release",
-          "build\SFML\Graphics\Release",
-          "build\lib",
-          "build\SFML\System",
-          "build\SFML\Window", 
-          "build\SFML\Graphics"
+        # 复制库文件
+        if exist output\lib\*.a (
+          copy output\lib\*.a SFML-output\lib\
+          echo "✓ 库文件已复制"
         )
-        
-        foreach ($path in $paths) {
-          if (Test-Path $path\*.a) {
-            copy $path\*.a sfml-output\lib\
-            echo "Copied from $path"
-          }
-        }
         
         # 显示结果
-        echo "Collected libraries:"
-        dir sfml-output\lib
+        echo "输出内容:"
+        dir SFML-output /s
         
-        # 如果没有找到库，尝试手动编译
-        if not exist sfml-output\lib\*.a (
-          echo "No .a files found, attempting manual compilation..."
-          cd src\SFML\System
-          g++ -c -I..\..\..\include -DSFML_STATIC *.cpp
-          ar rcs libsfml-system.a *.o
-          copy libsfml-system.a ..\..\..\sfml-output\lib\
-          cd ..\..\..
-        )
+        # 创建ZIP包
+        7z a sfml-simple-build.zip SFML-output
         
-        # 创建ZIP
-        7z a sfml-2.6.x-mingw64.zip sfml-output
-    
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: SFML-2.6.x-MinGW64
-        path: sfml-2.6.x-mingw64.zip
+        name: SFML-Simple-Build
+        path: sfml-simple-build.zip
