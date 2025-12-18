@@ -1,0 +1,64 @@
+name: Build SFML for PNG Animator
+
+on:
+  workflow_dispatch:  # 手动触发
+  push:
+    tags:
+      - 'v2.6.1-custom'  # 只监听特定标签
+
+jobs:
+  build-sfml-minimal:
+    name: Build SFML (MinGW x64 Static)
+    runs-on: windows-2025
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+      with:
+        ref: 2.6.1  # 确保使用2.6.1分支
+    
+    - name: Setup MinGW (使用你的WinLibs版本)
+      run: |
+        # 下载更兼容的WinLibs（与你的本地版本匹配）
+        curl -Lo mingw64.zip https://github.com/brechtsanders/winlibs_mingw/releases/download/15.2.0posix-19.1.1-13.0.0-ucrt-r4/winlibs-x86_64-posix-seh-gcc-15.2.0-mingw-w64ucrt-13.0.0-r4.zip
+        mkdir "C:\mingw64"
+        tar -xf mingw64.zip -C "C:\mingw64" --strip-components=1
+        echo "C:\mingw64\bin" >> $GITHUB_PATH
+    
+    - name: Configure CMake (只编译静态库)
+      run: |
+        cmake -B build -G "MinGW Makefiles" ^
+          -DCMAKE_BUILD_TYPE=Release ^
+          -DBUILD_SHARED_LIBS=OFF ^
+          -DSFML_BUILD_EXAMPLES=OFF ^
+          -DSFML_BUILD_TESTS=OFF ^
+          -DSFML_BUILD_DOC=OFF
+    
+    - name: Build SFML
+      run: |
+        cmake --build build --config Release --parallel 4
+    
+    - name: Install to local directory
+      run: |
+        cmake --install build --prefix ./sfml-output
+    
+    - name: Package results
+      run: |
+        # 创建我们需要的目录结构
+        mkdir -p SFML-2.6.1-MinGW-x64-static
+        # 复制头文件
+        xcopy /E /I include\SFML SFML-2.6.1-MinGW-x64-static\include\SFML
+        # 复制库文件
+        xcopy /E /I sfml-output\lib SFML-2.6.1-MinGW-x64-static\lib
+        # 复制必要的DLL（如果有）
+        if exist sfml-output\bin (
+          xcopy /E /I sfml-output\bin SFML-2.6.1-MinGW-x64-static\bin
+        )
+        # 创建ZIP包
+        7z a -tzip SFML-2.6.1-MinGW-x64-static.zip SFML-2.6.1-MinGW-x64-static
+    
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: SFML-2.6.1-MinGW-x64-static
+        path: SFML-2.6.1-MinGW-x64-static.zip
