@@ -1,95 +1,82 @@
-name: Simple SFML Build
+name: SFML PowerShell Build
 
-on:
-  workflow_dispatch:
+on: workflow_dispatch
 
 jobs:
-  build-sfml:
+  build:
     runs-on: windows-2025
     
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+    - uses: actions/checkout@v4
     
-    - name: Check Environment
+    - name: Build with PowerShell (Correct Syntax)
+      shell: pwsh  # 指定使用PowerShell
       run: |
-        echo "Checking available compilers..."
-        where gcc
-        where g++
-        where ar
-        g++ --version
-        echo "Current directory:"
-        pwd
-        dir
+        Write-Host "=== 开始编译 SFML ===" -ForegroundColor Green
         
-    - name: Try Direct Compilation
-      run: |
-        echo "=== 尝试直接编译 ==="
+        # 检查目录
+        Write-Host "检查目录结构..." -ForegroundColor Yellow
+        Get-ChildItem -Path "include" -Recurse -Depth 1 | Select-Object Name, FullName
         
-        # 先检查头文件是否存在
-        echo "检查头文件..."
-        if exist include\SFML\System.hpp (
-          echo "✓ 找到System.hpp"
-        ) else (
-          echo "✗ 未找到System.hpp"
-          dir include
+        # 检查头文件是否存在
+        $systemHeader = "include/SFML/System.hpp"
+        if (Test-Path $systemHeader) {
+          Write-Host "✓ 找到头文件: $systemHeader" -ForegroundColor Green
+        } else {
+          Write-Host "✗ 未找到头文件: $systemHeader" -ForegroundColor Red
           exit 1
-        )
+        }
         
-        # 编译System模块
-        echo "编译System模块..."
-        cd src\SFML\System
+        # 进入System源码目录
+        Set-Location "src/SFML/System"
         
-        # 只编译几个基本文件测试
-        g++ -c -I..\..\..\include -DSFML_STATIC Clock.cpp Err.cpp
-        if errorlevel 1 (
-          echo "编译失败，尝试不同的包含路径..."
-          # 尝试相对路径
-          g++ -c -I../../../../include -DSFML_STATIC Clock.cpp
-        )
+        # 编译测试文件
+        Write-Host "编译Clock.cpp..." -ForegroundColor Yellow
+        & "C:\Program Files\Git\usr\bin\g++.exe" -c -I"../../../include" -DSFML_STATIC Clock.cpp
         
-        # 检查是否生成了.o文件
-        dir *.o
+        # 检查是否成功
+        if ($LASTEXITCODE -eq 0) {
+          Write-Host "✓ Clock.cpp 编译成功" -ForegroundColor Green
+          
+          # 创建库
+          if (Test-Path "Clock.o") {
+            & "C:\Program Files\Git\usr\bin\ar.exe" rcs libsfml-system.a Clock.o
+            Write-Host "✓ 创建库文件" -ForegroundColor Green
+          }
+        }
         
-        # 如果有.o文件，创建库
-        if exist *.o (
-          ar rcs libsfml-system.a *.o
-          echo "✓ System模块编译成功"
-          mkdir ..\..\..\..\output\lib -Force
-          copy libsfml-system.a ..\..\..\..\output\lib\
-        )
+        # 返回根目录
+        Set-Location "../../../"
         
-        cd ..\..\..
-    
-    - name: Create Output Package
+    - name: Create Output
+      shell: pwsh
       run: |
-        echo "=== 创建输出包 ==="
-        
-        # 创建基本目录结构
-        mkdir -p SFML-output\include
-        mkdir -p SFML-output\lib
+        # 创建输出目录
+        New-Item -ItemType Directory -Path "output" -Force
+        New-Item -ItemType Directory -Path "output/include" -Force
+        New-Item -ItemType Directory -Path "output/lib" -Force
         
         # 复制头文件
-        if exist include\SFML (
-          xcopy /E /I include\SFML SFML-output\include\SFML
-          echo "✓ 头文件已复制"
-        )
+        if (Test-Path "include/SFML") {
+          Copy-Item -Path "include/SFML" -Destination "output/include/" -Recurse
+          Write-Host "✓ 头文件已复制" -ForegroundColor Green
+        }
         
         # 复制库文件
-        if exist output\lib\*.a (
-          copy output\lib\*.a SFML-output\lib\
-          echo "✓ 库文件已复制"
-        )
+        $libFile = "src/SFML/System/libsfml-system.a"
+        if (Test-Path $libFile) {
+          Copy-Item -Path $libFile -Destination "output/lib/"
+          Write-Host "✓ 库文件已复制" -ForegroundColor Green
+        }
         
         # 显示结果
-        echo "输出内容:"
-        dir SFML-output /s
+        Write-Host "输出目录内容:" -ForegroundColor Cyan
+        Get-ChildItem -Path "output" -Recurse
         
-        # 创建ZIP包
-        7z a sfml-simple-build.zip SFML-output
+        # 创建ZIP
+        Compress-Archive -Path "output/*" -DestinationPath "sfml-test.zip"
         
-    - name: Upload Artifact
-      uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v4
       with:
-        name: SFML-Simple-Build
-        path: sfml-simple-build.zip
+        name: SFML-Test-Build
+        path: sfml-test.zip
